@@ -1,0 +1,6 @@
+{
+  "name": "Free Fire Auto Likes",
+  "description": "Professional Free Fire Auto Likes & UID Verification Website with 6/8 Digit Short Link Verification and Admin Dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

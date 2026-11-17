@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "Admin": {
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_admin", "admin"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Setting": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "globalDailyLimit": { "type": "number" },
+        "perUidDailyLimit": { "type": "number" },
+        "codeLength": { "type": "number", "enum": [6, 8] },
+        "codeExpiryMinutes": { "type": "number" },
+        "maxWrongAttempts": { "type": "number" },
+        "lockDurationMinutes": { "type": "number" },
+        "apiBaseUrl": { "type": "string" },
+        "apiKey": { "type": "string" },
+        "apiStatus": { "type": "string", "enum": ["active", "maintenance", "demo"] },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "globalDailyLimit", "perUidDailyLimit"]
+    },
+    "ShortLink": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "verificationCode": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "isToday": { "type": "boolean" },
+        "verificationCount": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "url", "verificationCode", "isActive"]
+    },
+    "Verification": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "code": { "type": "string" },
+        "used": { "type": "boolean" },
+        "expiresAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "uid", "code", "used", "expiresAt"]
+    },
+    "LikesRequest": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "freeFireUid": { "type": "string" },
+        "playerName": { "type": "string" },
+        "region": { "type": "string" },
+        "userId": { "type": "string" },
+        "status": { "type": "string", "enum": ["success", "failed", "pending"] },
+        "likesCount": { "type": "number" },
+        "dateStr": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "freeFireUid", "status", "dateStr", "createdAt"]
+    },
+    "ApiLog": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "method": { "type": "string" },
+        "status": { "type": "number" },
+        "response": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "endpoint", "status", "timestamp"]
+    }
+  },
+  "firestore": {
+    "admins": {
+      "schema": "Admin",
+      "rules": "allow read, write: if request.auth != null;"
+    },
+    "settings": {
+      "schema": "Setting",
+      "rules": "allow read: if true; allow write: if request.auth != null;"
+    },
+    "shortLinks": {
+      "schema": "ShortLink",
+      "rules": "allow read: if true; allow write: if request.auth != null;"
+    },
+    "verifications": {
+      "schema": "Verification",
+      "rules": "allow read, write: if true;"
+    },
+    "likesRequests": {
+      "schema": "LikesRequest",
+      "rules": "allow read, write: if true;"
+    },
+    "apiLogs": {
+      "schema": "ApiLog",
+      "rules": "allow read, write: if request.auth != null;"
+    }
+  }
+}
