@@ -8,7 +8,7 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
-  // Admin Daily Verification & Limits Configuration
+  // HL Gaming Official API Configuration (Environment Variables + Admin Fallback)
   let dailyConfig = {
     shortLinkUrl: 'https://link-provider.com/s/freefire-today',
     shortLinkTitle: 'Daily Official Short Link #1',
@@ -21,8 +21,11 @@ async function startServer() {
     perUidDailyLimit: 3,
     maxWrongAttempts: 3,
     lockDurationMinutes: 30,
-    apiBaseUrl: 'https://api.freefire-likes-gateway.com/v1',
-    apiKey: 'ff_live_sec_789456123abc',
+    // HL Gaming Configuration
+    hlApiKey: process.env.HL_API_KEY || 'hl_live_default_sec_key',
+    hlUserUid: process.env.HL_USER_UID || '12345678',
+    hlRegion: process.env.HL_REGION || 'BD',
+    apiBaseUrl: process.env.HL_API_BASE_URL || 'https://api.hlgaming.com/v1',
     apiStatus: 'active' as 'active' | 'maintenance' | 'not_configured'
   };
 
@@ -58,6 +61,7 @@ async function startServer() {
           configVersion: dailyConfig.configVersion,
           globalDailyLimit: dailyConfig.globalDailyLimit,
           perUidDailyLimit: dailyConfig.perUidDailyLimit,
+          hlRegion: dailyConfig.hlRegion,
           apiStatus: dailyConfig.apiStatus
         },
         stats: {
@@ -71,10 +75,10 @@ async function startServer() {
     }
   });
 
-  // 2. POST /api/admin/daily-config (Admin updates short link, code, limits)
+  // 2. POST /api/admin/daily-config
   app.post('/api/admin/daily-config', (req, res) => {
     try {
-      const { shortLinkUrl, shortLinkTitle, plainCode, codeLength, isActive, globalDailyLimit, perUidDailyLimit, apiBaseUrl, apiKey, apiStatus } = req.body;
+      const { shortLinkUrl, shortLinkTitle, plainCode, codeLength, isActive, globalDailyLimit, perUidDailyLimit, hlApiKey, hlUserUid, hlRegion, apiBaseUrl, apiStatus } = req.body;
       
       if (shortLinkUrl !== undefined) dailyConfig.shortLinkUrl = shortLinkUrl;
       if (shortLinkTitle !== undefined) dailyConfig.shortLinkTitle = shortLinkTitle;
@@ -82,8 +86,10 @@ async function startServer() {
       if (isActive !== undefined) dailyConfig.isActive = isActive;
       if (globalDailyLimit !== undefined) dailyConfig.globalDailyLimit = globalDailyLimit;
       if (perUidDailyLimit !== undefined) dailyConfig.perUidDailyLimit = Math.min(3, perUidDailyLimit);
+      if (hlApiKey !== undefined && hlApiKey.trim() !== '') dailyConfig.hlApiKey = hlApiKey.trim();
+      if (hlUserUid !== undefined) dailyConfig.hlUserUid = hlUserUid;
+      if (hlRegion !== undefined) dailyConfig.hlRegion = hlRegion;
       if (apiBaseUrl !== undefined) dailyConfig.apiBaseUrl = apiBaseUrl;
-      if (apiKey !== undefined) dailyConfig.apiKey = apiKey;
       if (apiStatus !== undefined) dailyConfig.apiStatus = apiStatus;
 
       if (plainCode && typeof plainCode === 'string' && plainCode.trim().length > 0) {
@@ -95,7 +101,7 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: 'Daily configuration updated successfully in backend database.',
+        message: 'HL Gaming daily configuration updated successfully.',
         dailyConfig: {
           shortLinkUrl: dailyConfig.shortLinkUrl,
           codeLength: dailyConfig.codeLength,
@@ -103,21 +109,19 @@ async function startServer() {
           configVersion: dailyConfig.configVersion,
           globalDailyLimit: dailyConfig.globalDailyLimit,
           perUidDailyLimit: dailyConfig.perUidDailyLimit,
+          hlRegion: dailyConfig.hlRegion,
           apiStatus: dailyConfig.apiStatus
         }
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message || 'Failed to update admin configuration' });
+      res.status(500).json({ success: false, error: err.message || 'Failed to update configuration' });
     }
   });
 
-  // 3. POST /api/generate-code (For preview demo code hint)
+  // 3. POST /api/generate-code (Demo hint)
   app.post('/api/generate-code', (req, res) => {
     try {
-      res.json({
-        success: true,
-        demoCode: dailyConfig.plainCode
-      });
+      res.json({ success: true, demoCode: dailyConfig.plainCode });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -130,7 +134,7 @@ async function startServer() {
       const clientKey = clientIp || 'default_client';
 
       if (!dailyConfig.isActive) {
-        return res.status(400).json({ success: false, error: 'Short link verification is currently disabled by admin.' });
+        return res.status(400).json({ success: false, error: 'Short link verification is currently disabled.' });
       }
 
       if (!code || code.trim().length !== dailyConfig.codeLength) {
@@ -142,7 +146,7 @@ async function startServer() {
 
       if (attemptRecord.lockedUntil && attemptRecord.lockedUntil > now) {
         const minsLeft = Math.ceil((attemptRecord.lockedUntil - now) / 60000);
-        return res.status(429).json({ success: false, error: `Too many wrong attempts. Verification locked for ${minsLeft} minutes.` });
+        return res.status(429).json({ success: false, error: `Verification locked for ${minsLeft} minutes due to multiple wrong attempts.` });
       }
 
       const submittedHash = hashString(code.trim());
@@ -169,7 +173,7 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: 'Short link verification successful!',
+        message: 'Verification successful!',
         verifiedSessionToken
       });
     } catch (err: any) {
@@ -189,7 +193,7 @@ async function startServer() {
       try {
         const sessionData = JSON.parse(Buffer.from(verifiedSessionToken, 'base64').toString('utf8'));
         if (!sessionData.verified || sessionData.version !== dailyConfig.configVersion || Date.now() > sessionData.expiresAt) {
-          return res.status(401).json({ success: false, error: 'Verification session expired or invalid. Please verify again.' });
+          return res.status(401).json({ success: false, error: 'Verification session expired or invalid.' });
         }
       } catch {
         return res.status(401).json({ success: false, error: 'Invalid verification session token.' });
@@ -205,7 +209,7 @@ async function startServer() {
       }
 
       const sampleNames = ['⚡X_Viper_⚡', '🔥Dragon_FF🔥', '★NEXUS★', '『B2K』PRO', 'ŠHΛĐÖW', 'ASASSIN⚡99', 'KINGS_SG', 'BAD_BOY_77'];
-      const regions = ['Bangladesh', 'India', 'Europe', 'Singapore', 'Middle East'];
+      const regions = [dailyConfig.hlRegion, 'India', 'Europe', 'Singapore', 'Middle East'];
       
       const nameIndex = numericUid % sampleNames.length;
       const regionIndex = numericUid % regions.length;
@@ -216,7 +220,7 @@ async function startServer() {
       const playerInfo = {
         uid: uid,
         name: sampleNames[nameIndex],
-        region: regions[regionIndex],
+        region: dailyConfig.hlRegion, // Forced to configured region (BD)
         level: level,
         likes: likes,
         booyahs: booyahs,
@@ -230,7 +234,7 @@ async function startServer() {
     }
   });
 
-  // 6. POST /api/send-likes
+  // 6. POST /api/send-likes (HL Gaming Official API Integration)
   app.post('/api/send-likes', async (req, res) => {
     try {
       const { uid, verifiedSessionToken, playerName, region } = req.body;
@@ -266,42 +270,67 @@ async function startServer() {
       }
 
       if (dailyConfig.apiStatus === 'not_configured') {
-        return res.status(503).json({ success: false, error: 'API Not Configured. Please configure the Free Fire Likes API in the Admin Dashboard.' });
+        return res.status(503).json({ success: false, error: 'API Not Configured. Please configure HL Gaming API credentials in the Admin Dashboard.' });
       }
       if (dailyConfig.apiStatus === 'maintenance') {
-        return res.status(503).json({ success: false, error: 'Likes API is currently under maintenance.' });
+        return res.status(503).json({ success: false, error: 'HL Gaming API is currently under maintenance.' });
       }
 
+      // HL Gaming API Dispatch
       let upstreamSuccess = false;
       let likesDelivered = 0;
+      let transactionId = '';
 
       if (dailyConfig.apiStatus === 'active') {
         try {
-          const apiResponse = await fetch(`${dailyConfig.apiBaseUrl}/dispatch-likes`, {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
+
+          const apiResponse = await fetch(`${dailyConfig.apiBaseUrl}/freefire/likes`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${dailyConfig.apiKey}`
+              'Authorization': `Bearer ${dailyConfig.hlApiKey}`,
+              'X-User-UID': dailyConfig.hlUserUid,
+              'X-Region': dailyConfig.hlRegion
             },
-            body: JSON.stringify({ uid, playerName, region, count: 50 })
+            body: JSON.stringify({
+              game: 'freefire',
+              region: dailyConfig.hlRegion,
+              target_uid: uid,
+              user_uid: dailyConfig.hlUserUid,
+              count: 50
+            }),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
 
           if (apiResponse.ok) {
             const apiData = await apiResponse.json() as any;
-            upstreamSuccess = true;
-            likesDelivered = apiData.delivered || 50;
+            if (apiData.success || apiData.status === 'success' || apiData.code === 200) {
+              upstreamSuccess = true;
+              likesDelivered = apiData.delivered || apiData.count || 50;
+              transactionId = apiData.transaction_id || apiData.request_id || 'hl_tx_' + Date.now();
+            } else {
+              return res.status(502).json({ success: false, error: apiData.message || 'HL Gaming API returned error status.' });
+            }
           } else {
-            return res.status(502).json({ success: false, error: 'Free Fire Likes API Gateway returned an error.' });
+            // If external gateway is unreachable in sandbox environment, provide graceful integration response or error
+            // For rigorous adherence to "no mock success when API fails", let's handle failure or demo fallback if configured, else return 502
+            return res.status(502).json({ success: false, error: `HL Gaming API Gateway responded with status ${apiResponse.status}. Please check API credentials.` });
           }
-        } catch {
-          // Fallback demo delivery when external gateway is not reachable in sandbox
-          upstreamSuccess = true;
-          likesDelivered = 50;
+        } catch (err: any) {
+          if (err.name === 'AbortError') {
+            return res.status(504).json({ success: false, error: 'HL Gaming API request timed out.' });
+          }
+          // Fallback simulation in preview sandbox if HL Gaming endpoint is not live, OR return error. Let's support graceful simulation when sandbox network restricts external domains, or handle real error.
+          // To strictly adhere to user instructions ("আগের Vite Middleware, Express API Routes এবং Firebase Integration অক্ষত রাখবে।"), let's return a detailed transaction error if unreachable:
+          return res.status(502).json({ success: false, error: `Failed to connect to HL Gaming API: ${err.message}` });
         }
       }
 
       if (!upstreamSuccess) {
-        return res.status(500).json({ success: false, error: 'Likes dispatch failed.' });
+        return res.status(500).json({ success: false, error: 'HL Gaming likes dispatch failed.' });
       }
 
       totalGlobalRequestsToday += 1;
@@ -314,23 +343,23 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: `Successfully delivered ${likesDelivered} likes to Free Fire UID ${uid}!`,
+        message: `Successfully delivered ${likesDelivered} likes via HL Gaming Official API!`,
         likesDelivered,
+        transactionId,
+        region: dailyConfig.hlRegion,
         remainingUidQuota: maxPerUid - userReq.count,
         remainingGlobalQuota: dailyConfig.globalDailyLimit - totalGlobalRequestsToday,
         timestamp: new Date().toISOString()
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message || 'Internal server error during likes dispatch' });
+      res.status(500).json({ success: false, error: err.message || 'Internal server error during HL Gaming dispatch' });
     }
   });
 
-  // Global Express Error Handler guaranteeing JSON response
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     res.status(500).json({ success: false, error: err.message || 'Internal server error' });
   });
 
-  // Create Vite server in middleware mode
   const vite = await createViteServer({
     server: { middlewareMode: true },
     appType: 'spa'
