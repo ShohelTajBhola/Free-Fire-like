@@ -327,7 +327,11 @@ export default function App() {
       setActiveTab('admin');
       showToast('Admin logged in successfully!', 'success');
     } catch (err: any) {
-      showToast(err.message || 'Login failed.', 'error');
+      if (err.code === 'auth/unauthorized-domain') {
+        showToast('Unauthorized Domain: Please add "freefirelike1.vercel.app" in Firebase Console > Authentication > Authorized domains.', 'error');
+      } else {
+        showToast(err.message || 'Login failed.', 'error');
+      }
     }
   };
 
