@@ -15,7 +15,7 @@ try {
   const firebaseApp = initializeApp(firebaseConfig);
   db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
 } catch (e) {
-  console.warn('Firebase backend initialization warning:', e);
+  // Silent catch
 }
 
 // Default Configuration State
@@ -39,7 +39,6 @@ let dailyConfig = {
   updatedAt: new Date().toISOString()
 };
 
-// Sync config from Firestore on startup if available
 async function loadConfigFromFirestore() {
   if (!db) return;
   try {
@@ -49,8 +48,8 @@ async function loadConfigFromFirestore() {
       const data = docSnap.data();
       dailyConfig = { ...dailyConfig, ...data };
     }
-  } catch (e) {
-    console.warn('Could not load config from Firestore:', e);
+  } catch {
+    // Silent fallback to default in-memory config
   }
 }
 loadConfigFromFirestore();
@@ -102,7 +101,7 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
-// 2. POST /api/admin/daily-config (Saves to Firestore and Memory)
+// 2. POST /api/admin/daily-config
 app.post('/api/admin/daily-config', async (req, res) => {
   try {
     const { shortLinkUrl, shortLinkTitle, plainCode, codeLength, isActive, globalDailyLimit, perUidDailyLimit, hlApiKey, hlUserUid, hlRegion, apiBaseUrl, apiStatus } = req.body;
@@ -137,18 +136,17 @@ app.post('/api/admin/daily-config', async (req, res) => {
 
     dailyConfig.updatedAt = new Date().toISOString();
 
-    // Persist to Firestore database
     if (db) {
       try {
         await setDoc(doc(db, 'settings', 'dailyConfig'), dailyConfig);
-      } catch (firestoreErr) {
-        console.warn('Failed to save config to Firestore:', firestoreErr);
+      } catch {
+        // Silent catch for Firestore sync
       }
     }
 
     res.json({
       success: true,
-      message: 'Daily configuration saved successfully to database.',
+      message: 'Daily configuration saved successfully.',
       dailyConfig: {
         shortLinkUrl: dailyConfig.shortLinkUrl,
         codeLength: dailyConfig.codeLength,
@@ -397,7 +395,6 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   res.status(500).json({ success: false, error: err.message || 'Internal server error' });
 });
 
-// Development vs Production server setup
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   import('vite').then(({ createServer: createViteServer }) => {
     createViteServer({
