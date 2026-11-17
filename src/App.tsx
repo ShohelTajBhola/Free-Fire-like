@@ -54,6 +54,34 @@ interface DailyConfig {
   apiStatus: 'active' | 'maintenance' | 'not_configured';
 }
 
+// Safe Fetch Helper preventing "Unexpected end of JSON input" and HTML parse crashes
+async function safeFetch(url: string, options?: RequestInit) {
+  const res = await fetch(url, options);
+  const contentType = res.headers.get('content-type');
+  let data: any = null;
+
+  if (contentType && contentType.includes('application/json')) {
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+  } else {
+    const text = await res.text();
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { success: false, error: text ? text.slice(0, 200) : `Server responded with status ${res.status}` };
+    }
+  }
+
+  if (!res.ok || (data && data.success === false)) {
+    throw new Error(data.error || data.message || `Server error (${res.status})`);
+  }
+
+  return data;
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'history' | 'faq' | 'admin'>('home');
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -93,7 +121,6 @@ export default function App() {
   // Admin States
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [adminUser, setAdminUser] = useState<any>(null);
-  const [adminSubTab, setAdminSubTab] = useState<'daily' | 'limits' | 'api' | 'stats'>('daily');
 
   // Admin Form Inputs
   const [adminShortLinkUrl, setAdminShortLinkUrl] = useState('');
@@ -127,8 +154,7 @@ export default function App() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch('/api/config');
-      const data = await res.json();
+      const data = await safeFetch('/api/config');
       if (data.dailyConfig) {
         setDailyConfig(data.dailyConfig);
         setAdminShortLinkUrl(data.dailyConfig.shortLinkUrl);
@@ -152,7 +178,6 @@ export default function App() {
       });
       if (items.length > 0) setRequestHistory(items);
     } catch {
-      // Demo history fallback
       setRequestHistory([
         { freeFireUid: '849201847', playerName: '⚡X_Viper_⚡', region: 'Bangladesh', status: 'success', likesCount: 50, dateStr: '2026-11-17', createdAt: new Date().toISOString() }
       ]);
@@ -162,20 +187,17 @@ export default function App() {
   // STEP 1: Visit Short Link
   const handleVisitShortLink = async () => {
     try {
-      // Request a demo code hint for test preview visibility
-      const res = await fetch('/api/generate-code', {
+      const data = await safeFetch('/api/generate-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uid: 'preview_visitor' })
       });
-      const data = await res.json();
       if (data.demoCode) {
         setDemoCodeHint(data.demoCode);
         setShowDemoBox(true);
       }
-
       window.open(dailyConfig.shortLinkUrl, '_blank');
-      showToast('Opened today’s short link! Complete the page instructions to get your code.', 'info');
+      showToast('Opened today’s short link! Complete the instructions to get your code.', 'info');
     } catch {
       window.open(dailyConfig.shortLinkUrl, '_blank');
     }
@@ -191,13 +213,11 @@ export default function App() {
 
     setIsVerifyingCode(true);
     try {
-      const res = await fetch('/api/verify-daily-code', {
+      const data = await safeFetch('/api/verify-daily-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: verificationCodeInput })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Invalid verification code');
 
       setIsVerifiedSession(true);
       setVerifiedSessionToken(data.verifiedSessionToken);
@@ -219,13 +239,11 @@ export default function App() {
 
     setIsVerifyingUid(true);
     try {
-      const res = await fetch('/api/verify-uid', {
+      const data = await safeFetch('/api/verify-uid', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uid: uidInput, verifiedSessionToken })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to verify UID');
 
       setPlayerInfo(data.player);
       showToast(`Player "${data.player.name}" verified successfully!`, 'success');
@@ -253,13 +271,13 @@ export default function App() {
     }
 
     if (dailyConfig.apiStatus === 'not_configured') {
-      showToast('API Not Configured. Please ask admin to configure Likes API.', 'error');
+      showToast('API Not Configured. Please configure the Free Fire Likes API in the Admin Dashboard.', 'error');
       return;
     }
 
     setIsSendingLikes(true);
     try {
-      const res = await fetch('/api/send-likes', {
+      const data = await safeFetch('/api/send-likes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -269,8 +287,6 @@ export default function App() {
           region: playerInfo.region
         })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to dispatch likes');
 
       const newCount = uidRequestsCount + 1;
       setUidRequestsCount(newCount);
@@ -318,7 +334,7 @@ export default function App() {
   const handleSaveAdminConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/admin/daily-config', {
+      const data = await safeFetch('/api/admin/daily-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -331,14 +347,12 @@ export default function App() {
           isActive: true
         })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save config');
 
       setAdminNewCode('');
       fetchConfig();
       showToast('Admin daily configuration updated successfully!', 'success');
     } catch (err: any) {
-      showToast(err.message || 'Error updating config.', 'error');
+      showToast(err.message || 'Error updating configuration.', 'error');
     }
   };
 
@@ -431,7 +445,6 @@ export default function App() {
         {activeTab === 'home' && (
           <div className="space-y-12 animate-fade-in max-w-4xl mx-auto">
 
-            {/* Hero */}
             <div className="text-center space-y-3">
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-red-600/10 border border-red-500/35 text-red-400 text-xs font-bold uppercase tracking-widest">
                 <Sparkles className="w-3.5 h-3.5" /> Strict Short Link & UID Verification Workflow
@@ -444,7 +457,7 @@ export default function App() {
               </p>
             </div>
 
-            {/* STEP 1, 2, 3: Short Link Verification (REQUIRED FIRST) */}
+            {/* STEP 1, 2, 3: Short Link Verification */}
             <div className={`bg-zinc-950/90 border rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden transition-all ${isVerifiedSession ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-red-500/50 shadow-[0_0_30px_rgba(220,38,38,0.15)]'}`}>
               <div className="absolute top-0 right-0 w-48 h-48 bg-red-600/10 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -467,7 +480,6 @@ export default function App() {
                 {!isVerifiedSession ? (
                   <div className="space-y-6 pt-2">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Visit Short Link Button */}
                       <button
                         onClick={handleVisitShortLink}
                         className="w-full bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold py-4 px-6 rounded-xl text-sm transition-all shadow-lg flex items-center justify-center gap-2.5 border border-amber-500/40 uppercase tracking-wide font-['Orbitron',sans-serif]"
@@ -475,7 +487,6 @@ export default function App() {
                         <ExternalLink className="w-5 h-5" /> Visit Today's Short Link
                       </button>
 
-                      {/* Demo Hint Box for Testing */}
                       {showDemoBox && (
                         <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex flex-col justify-center text-xs space-y-1">
                           <span className="text-amber-300 font-bold">💡 Code Hint (Demo Mode):</span>
@@ -492,7 +503,6 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* Submit Verification Code */}
                     <form onSubmit={handleVerifyCodeSubmit} className="space-y-4 pt-2 border-t border-zinc-900">
                       <div>
                         <label className="block text-xs font-semibold text-zinc-300 mb-1.5 uppercase tracking-wider">
@@ -532,7 +542,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* STEP 4 & 5: Free Fire UID & Likes Section (LOCKED UNLESS IS_VERIFIED_SESSION) */}
+            {/* STEP 4 & 5: Free Fire UID & Likes Section */}
             <div className={`bg-zinc-900/80 backdrop-blur-xl border rounded-2xl p-6 sm:p-8 shadow-xl transition-all ${!isVerifiedSession ? 'opacity-50 pointer-events-none filter grayscale-[30%]' : 'border-zinc-800'}`}>
               <div className="flex items-center gap-3 mb-6">
                 <span className="w-9 h-9 rounded-xl bg-zinc-800 text-zinc-300 font-black font-['Orbitron',sans-serif] flex items-center justify-center text-sm border border-zinc-700">02</span>
@@ -545,7 +555,6 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* UID Verification Form */}
                 <div className="space-y-4">
                   <form onSubmit={handleVerifyUid} className="space-y-4">
                     <div>
@@ -596,7 +605,6 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Send Likes Action */}
                 <div className="space-y-4 flex flex-col justify-between">
                   <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-3">
                     <div className="flex justify-between text-xs">
@@ -634,7 +642,6 @@ export default function App() {
           </div>
         )}
 
-        {/* REQUEST HISTORY TAB */}
         {activeTab === 'history' && (
           <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
             <h2 className="text-2xl font-black font-['Orbitron',sans-serif] uppercase text-white">Request History</h2>
@@ -667,7 +674,6 @@ export default function App() {
           </div>
         )}
 
-        {/* FAQ TAB */}
         {activeTab === 'faq' && (
           <div className="space-y-4 max-w-3xl mx-auto animate-fade-in">
             <h2 className="text-2xl font-black font-['Orbitron',sans-serif] uppercase text-white">FAQ & Workflow Guide</h2>
@@ -682,7 +688,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ADMIN PORTAL TAB */}
         {activeTab === 'admin' && isAdminLoggedIn && (
           <div className="space-y-8 animate-fade-in max-w-3xl mx-auto">
             <div className="border-b border-zinc-800 pb-4">
@@ -774,7 +779,6 @@ export default function App() {
 
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-zinc-800/80 bg-[#07080c] py-8 mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-zinc-500">
           FIREBOOST FF © {new Date().getFullYear()} • Free Fire Auto Likes Website
