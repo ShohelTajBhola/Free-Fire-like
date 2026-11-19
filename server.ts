@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 import firebaseConfig from './firebase-applet-config.json';
 
 const app = express();
@@ -74,6 +74,47 @@ function hashString(str: string): string {
   return crypto.createHash('sha256').update(str).digest('hex');
 }
 
+// Server-side strict verification of Main Admin (soheltajbhola@gmail.com) via Firebase Auth REST API
+async function verifyMainAdmin(authHeader: string | undefined): Promise<string> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('Unauthorized. Missing authentication token.');
+  }
+  const token = authHeader.split('Bearer ')[1];
+  
+  if (token === 'admin_preview_token') {
+    // Allow preview sandbox if needed, but in production strictly enforce Google token
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Unauthorized preview token in production.');
+    }
+    return 'soheltajbhola@gmail.com';
+  }
+
+  const apiKey = firebaseConfig.apiKey;
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken: token })
+  });
+
+  if (!res.ok) {
+    throw new Error('Invalid or expired authentication session.');
+  }
+
+  const data = await res.json() as any;
+  if (!data.users || data.users.length === 0) {
+    throw new Error('Authenticated user not found.');
+  }
+
+  const user = data.users[0];
+  const email = user.email;
+
+  if (email !== 'soheltajbhola@gmail.com') {
+    throw new Error('Access denied. Only the authorized Main Admin (soheltajbhola@gmail.com) can access and modify admin settings.');
+  }
+
+  return email;
+}
+
 // 1. GET /api/config
 app.get('/api/config', async (req, res) => {
   try {
@@ -104,14 +145,10 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
-// 2. POST /api/admin/daily-config (Server-side Admin Authorization)
+// 2. POST /api/admin/daily-config (Strict Server-Side Main Admin Authorization)
 app.post('/api/admin/daily-config', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    // Server-side Admin Authorization check (Requires Bearer token or admin auth header)
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: 'Unauthorized. Admin authentication required.' });
-    }
+    const adminEmail = await verifyMainAdmin(req.headers.authorization);
 
     const { shortLinkUrl, shortLinkTitle, plainCode, codeLength, isActive, globalDailyLimit, perUidDailyLimit, hlApiKey, hlUserUid, hlRegion, apiBaseUrl, apiStatus } = req.body;
     
@@ -155,7 +192,7 @@ app.post('/api/admin/daily-config', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Daily configuration saved successfully.',
+      message: `Configuration successfully saved by Main Admin (${adminEmail}).`,
       dailyConfig: {
         shortLinkUrl: dailyConfig.shortLinkUrl,
         codeLength: dailyConfig.codeLength,
@@ -169,7 +206,7 @@ app.post('/api/admin/daily-config', async (req, res) => {
       }
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message || 'Failed to save configuration' });
+    res.status(403).json({ success: false, error: err.message || 'Forbidden. Main Admin authorization required.' });
   }
 });
 

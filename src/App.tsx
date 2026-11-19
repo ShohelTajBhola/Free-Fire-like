@@ -21,6 +21,8 @@ const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
+const MAIN_ADMIN_EMAIL = 'soheltajbhola@gmail.com';
+
 interface PlayerInfo {
   uid: string;
   name: string;
@@ -145,10 +147,13 @@ export default function App() {
     fetchHistory();
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
+      if (user && user.email === MAIN_ADMIN_EMAIL) {
         setAdminUser(user);
         setIsAdminLoggedIn(true);
       } else {
+        if (user) {
+          await signOut(auth);
+        }
         setAdminUser(null);
         setIsAdminLoggedIn(false);
       }
@@ -327,17 +332,23 @@ export default function App() {
   const handleAdminLogin = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
+      const email = result.user?.email;
+
+      if (email !== MAIN_ADMIN_EMAIL) {
+        await signOut(auth);
+        setIsAdminLoggedIn(false);
+        setAdminUser(null);
+        showToast(`Access Denied: Only ${MAIN_ADMIN_EMAIL} is authorized as Main Admin.`, 'error');
+        return;
+      }
+
       setAdminUser(result.user);
       setIsAdminLoggedIn(true);
       window.history.pushState({}, '', '/admin');
       setActiveTab('admin');
-      showToast('Admin logged in successfully!', 'success');
+      showToast('Main Admin logged in successfully!', 'success');
     } catch (err: any) {
-      if (err.code === 'auth/unauthorized-domain') {
-        showToast('Unauthorized Domain: Please add your domain in Firebase Console > Authentication > Authorized domains.', 'error');
-      } else {
-        showToast(err.message || 'Login failed.', 'error');
-      }
+      showToast(err.message || 'Login failed.', 'error');
     }
   };
 
@@ -345,7 +356,10 @@ export default function App() {
     e.preventDefault();
     try {
       const user = auth.currentUser;
-      const token = user ? await user.getIdToken() : 'admin_preview_token';
+      if (!user || user.email !== MAIN_ADMIN_EMAIL) {
+        throw new Error('Unauthorized. Only soheltajbhola@gmail.com can modify configuration.');
+      }
+      const token = await user.getIdToken();
 
       const data = await safeFetch('/api/admin/daily-config', {
         method: 'POST',
@@ -366,7 +380,7 @@ export default function App() {
 
       setAdminNewCode('');
       fetchConfig();
-      showToast('Admin daily configuration saved successfully!', 'success');
+      showToast('Main Admin configuration saved successfully!', 'success');
     } catch (err: any) {
       showToast(err.message || 'Error updating configuration.', 'error');
     }
@@ -425,20 +439,18 @@ export default function App() {
             >
               FAQ & Guide
             </button>
-            {isAdminLoggedIn && (
-              <button 
-                onClick={() => { window.history.pushState({}, '', '/admin'); setActiveTab('admin'); }}
-                className={`text-sm font-bold tracking-wide transition-colors pb-1 border-b-2 flex items-center gap-1.5 ${activeTab === 'admin' ? 'text-red-500 border-red-500' : 'text-zinc-400 border-transparent hover:text-zinc-200'}`}
-              >
-                <Shield className="w-4 h-4 text-red-500" /> Admin Panel (/admin)
-              </button>
-            )}
+            <button 
+              onClick={() => { window.history.pushState({}, '', '/admin'); setActiveTab('admin'); }}
+              className={`text-sm font-bold tracking-wide transition-colors pb-1 border-b-2 flex items-center gap-1.5 ${activeTab === 'admin' ? 'text-red-500 border-red-500' : 'text-zinc-400 border-transparent hover:text-zinc-200'}`}
+            >
+              <Shield className="w-4 h-4 text-red-500" /> Admin Panel (/admin)
+            </button>
           </nav>
 
           <div className="flex items-center gap-3">
             {isAdminLoggedIn ? (
               <button
-                onClick={() => { signOut(auth); setIsAdminLoggedIn(false); window.history.pushState({}, '', '/'); setActiveTab('home'); }}
+                onClick={() => { signOut(auth); setIsAdminLoggedIn(false); setAdminUser(null); window.history.pushState({}, '', '/'); setActiveTab('home'); showToast('Admin session invalidated successfully.', 'info'); }}
                 className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border border-zinc-700"
               >
                 <LogOut className="w-4 h-4" /> Logout
@@ -711,12 +723,12 @@ export default function App() {
               <div className="border-b border-zinc-800 pb-4 flex items-center justify-between">
                 <div>
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-600/20 text-red-400 text-[10px] font-bold uppercase tracking-widest border border-red-500/30">
-                    <Shield className="w-3 h-3" /> Secure Admin Panel (/admin)
+                    <Shield className="w-3 h-3" /> Main Admin Panel ({MAIN_ADMIN_EMAIL})
                   </div>
                   <h1 className="text-2xl font-black font-['Orbitron',sans-serif] uppercase text-white mt-1">Dashboard & Management</h1>
                 </div>
                 <div className="text-xs text-zinc-400 bg-zinc-900 px-3 py-1.5 rounded-xl border border-zinc-800">
-                  Admin: <strong className="text-white">{adminUser?.email}</strong>
+                  Authorized: <strong className="text-emerald-400">{adminUser?.email}</strong>
                 </div>
               </div>
 
@@ -842,14 +854,14 @@ export default function App() {
             <div className="max-w-md mx-auto bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center space-y-6 animate-fade-in">
               <Shield className="w-16 h-16 text-red-500 mx-auto animate-pulse" />
               <div className="space-y-2">
-                <h2 className="text-xl font-bold font-['Orbitron',sans-serif] uppercase text-white">Admin Authentication Required</h2>
-                <p className="text-xs text-zinc-400">You must sign in with an authorized admin account to access the /admin panel.</p>
+                <h2 className="text-xl font-bold font-['Orbitron',sans-serif] uppercase text-white">Main Admin Authentication</h2>
+                <p className="text-xs text-zinc-400">Only the authorized Main Admin (<strong className="text-red-400">{MAIN_ADMIN_EMAIL}</strong>) can sign in to the /admin panel.</p>
               </div>
               <button
                 onClick={handleAdminLogin}
                 className="w-full bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white font-bold py-3.5 px-6 rounded-xl text-xs uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(220,38,38,0.3)] flex items-center justify-center gap-2"
               >
-                <Lock className="w-4 h-4" /> Sign In as Admin
+                <Lock className="w-4 h-4" /> Sign In as Main Admin
               </button>
             </div>
           )
@@ -859,7 +871,7 @@ export default function App() {
 
       <footer className="border-t border-zinc-800/80 bg-[#07080c] py-8 mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-zinc-500">
-          FIREBOOST FF © {new Date().getFullYear()} • Free Fire Auto Likes Website • Production Domain: freefirelike1.vercel.app
+          FIREBOOST FF © {new Date().getFullYear()} • Free Fire Auto Likes Website • Main Admin: {MAIN_ADMIN_EMAIL}
         </div>
       </footer>
 
