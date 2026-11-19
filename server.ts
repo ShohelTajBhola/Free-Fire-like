@@ -82,7 +82,6 @@ async function verifyMainAdmin(authHeader: string | undefined): Promise<string> 
   const token = authHeader.split('Bearer ')[1];
   
   if (token === 'admin_preview_token') {
-    // Allow preview sandbox if needed, but in production strictly enforce Google token
     if (process.env.NODE_ENV === 'production') {
       throw new Error('Unauthorized preview token in production.');
     }
@@ -145,8 +144,8 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
-// 2. POST /api/admin/daily-config (Strict Server-Side Main Admin Authorization)
-app.post('/api/admin/daily-config', async (req, res) => {
+// Admin Configuration Handler (Supports both /api/admin/config and /api/admin/daily-config)
+async function handleAdminConfigSave(req: express.Request, res: express.Response) {
   try {
     const adminEmail = await verifyMainAdmin(req.headers.authorization);
 
@@ -208,7 +207,11 @@ app.post('/api/admin/daily-config', async (req, res) => {
   } catch (err: any) {
     res.status(403).json({ success: false, error: err.message || 'Forbidden. Main Admin authorization required.' });
   }
-});
+}
+
+// 2. POST /api/admin/config and POST /api/admin/daily-config
+app.post('/api/admin/config', handleAdminConfigSave);
+app.post('/api/admin/daily-config', handleAdminConfigSave);
 
 // 3. POST /api/generate-code
 app.post('/api/generate-code', (req, res) => {

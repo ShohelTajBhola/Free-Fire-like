@@ -361,7 +361,7 @@ export default function App() {
       }
       const token = await user.getIdToken();
 
-      const data = await safeFetch('/api/admin/daily-config', {
+      const data = await safeFetch('/api/admin/config', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
