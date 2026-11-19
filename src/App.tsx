@@ -12,12 +12,13 @@ import {
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, getDoc, setDoc, getDocs, addDoc, query, orderBy, limit } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDoc, setDoc, getDocs, addDoc, query, orderBy, limit, setLogLevel } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+setLogLevel('error');
 const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
