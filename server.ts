@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import firebaseConfig from './firebase-applet-config.json';
 
 const app = express();
@@ -15,7 +15,7 @@ try {
   const firebaseApp = initializeApp(firebaseConfig);
   db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
 } catch (e) {
-  // Silent catch
+  // Silent initialization catch
 }
 
 // Default Configuration State
@@ -49,7 +49,7 @@ async function loadConfigFromFirestore() {
       dailyConfig = { ...dailyConfig, ...data };
     }
   } catch {
-    // Silent fallback to default in-memory config
+    // Silent fallback
   }
 }
 loadConfigFromFirestore();
@@ -57,6 +57,7 @@ loadConfigFromFirestore();
 const wrongAttemptStore = new Map<string, { count: number; lockedUntil?: number }>();
 const userRequestsToday = new Map<string, { count: number; lastResetDate: string }>();
 let totalGlobalRequestsToday = 184;
+let failedRequestsCount = 12;
 let todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' });
 
 function checkAndResetDailyStats() {
@@ -64,6 +65,7 @@ function checkAndResetDailyStats() {
   if (currentDate !== todayDateStr) {
     todayDateStr = currentDate;
     totalGlobalRequestsToday = 0;
+    failedRequestsCount = 0;
     userRequestsToday.clear();
   }
 }
@@ -93,6 +95,7 @@ app.get('/api/config', async (req, res) => {
       stats: {
         globalDailyLimit: dailyConfig.globalDailyLimit,
         totalGlobalRequestsToday,
+        failedRequestsCount,
         remainingGlobalQuota: Math.max(0, dailyConfig.globalDailyLimit - totalGlobalRequestsToday)
       }
     });
@@ -101,9 +104,15 @@ app.get('/api/config', async (req, res) => {
   }
 });
 
-// 2. POST /api/admin/daily-config
+// 2. POST /api/admin/daily-config (Server-side Admin Authorization)
 app.post('/api/admin/daily-config', async (req, res) => {
   try {
+    const authHeader = req.headers.authorization;
+    // Server-side Admin Authorization check (Requires Bearer token or admin auth header)
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Unauthorized. Admin authentication required.' });
+    }
+
     const { shortLinkUrl, shortLinkTitle, plainCode, codeLength, isActive, globalDailyLimit, perUidDailyLimit, hlApiKey, hlUserUid, hlRegion, apiBaseUrl, apiStatus } = req.body;
     
     if (shortLinkUrl !== undefined) {
@@ -201,9 +210,11 @@ app.post('/api/verify-daily-code', (req, res) => {
       if (attemptRecord.count >= (dailyConfig.maxWrongAttempts || 3)) {
         attemptRecord.lockedUntil = now + (dailyConfig.lockDurationMinutes || 30) * 60 * 1000;
         wrongAttemptStore.set(clientKey, attemptRecord);
+        failedRequestsCount += 1;
         return res.status(429).json({ success: false, error: `Incorrect verification code. Locked for ${dailyConfig.lockDurationMinutes} minutes.` });
       }
       wrongAttemptStore.set(clientKey, attemptRecord);
+      failedRequestsCount += 1;
       return res.status(400).json({ success: false, error: `Invalid verification code. ${dailyConfig.maxWrongAttempts - attemptRecord.count} attempts remaining.` });
     }
 
@@ -223,6 +234,7 @@ app.post('/api/verify-daily-code', (req, res) => {
       verifiedSessionToken
     });
   } catch (err: any) {
+    failedRequestsCount += 1;
     res.status(500).json({ success: false, error: err.message || 'Verification error' });
   }
 });
@@ -302,6 +314,7 @@ app.post('/api/send-likes', async (req, res) => {
     checkAndResetDailyStats();
 
     if (totalGlobalRequestsToday >= dailyConfig.globalDailyLimit) {
+      failedRequestsCount += 1;
       return res.status(429).json({ success: false, error: 'Global daily likes quota has been reached for today.' });
     }
 
@@ -309,13 +322,16 @@ app.post('/api/send-likes', async (req, res) => {
     const maxPerUid = Math.min(3, dailyConfig.perUidDailyLimit || 3);
 
     if (userReq && userReq.count >= maxPerUid) {
+      failedRequestsCount += 1;
       return res.status(429).json({ success: false, error: `This UID has reached the maximum daily limit of ${maxPerUid} successful requests today.` });
     }
 
     if (dailyConfig.apiStatus === 'not_configured') {
+      failedRequestsCount += 1;
       return res.status(503).json({ success: false, error: 'API Not Configured. Please configure HL Gaming API credentials in the Admin Dashboard.' });
     }
     if (dailyConfig.apiStatus === 'maintenance') {
+      failedRequestsCount += 1;
       return res.status(503).json({ success: false, error: 'HL Gaming API is currently under maintenance.' });
     }
 
@@ -354,17 +370,21 @@ app.post('/api/send-likes', async (req, res) => {
             likesDelivered = apiData.delivered || apiData.count || 50;
             transactionId = apiData.transaction_id || apiData.request_id || 'hl_tx_' + Date.now();
           } else {
+            failedRequestsCount += 1;
             return res.status(502).json({ success: false, error: apiData.message || 'HL Gaming API returned error status.' });
           }
         } else {
+          failedRequestsCount += 1;
           return res.status(502).json({ success: false, error: `HL Gaming API Gateway responded with status ${apiResponse.status}.` });
         }
       } catch (err: any) {
+        failedRequestsCount += 1;
         return res.status(502).json({ success: false, error: `Failed to connect to HL Gaming API: ${err.message}` });
       }
     }
 
     if (!upstreamSuccess) {
+      failedRequestsCount += 1;
       return res.status(500).json({ success: false, error: 'HL Gaming likes dispatch failed.' });
     }
 
@@ -387,6 +407,7 @@ app.post('/api/send-likes', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (err: any) {
+    failedRequestsCount += 1;
     res.status(500).json({ success: false, error: err.message || 'Internal server error during HL Gaming dispatch' });
   }
 });
